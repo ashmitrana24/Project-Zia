@@ -9,6 +9,7 @@ I am Zia, your Senior FAANG Engineer (L5). I'm here to provide professional, opt
 
 **Available Commands:**
 • \`!ask <problem>\` - Get a senior-level breakdown of any DSA problem or concept.
+• \`!run <lang> <code>\` - Execute C++, Java, or Python code.
 • \`!help\` - Show this manual.
 
 **How I Communicate:**

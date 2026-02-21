@@ -143,3 +143,58 @@ Or pushes toward system-level thinking.
     throw new Error(`Gemini API Error: ${error.message || 'Unknown error'}`);
   }
 }
+
+/**
+ * Explains a code execution result and its logic.
+ * 
+ * @param {string} language - The programming language.
+ * @param {string} code - The code that was executed.
+ * @param {object} result - The execution result from Wandbox.
+ * @returns {Promise<string>} - The AI-generated explanation.
+ */
+export async function explainCode(language, code, result) {
+  try {
+    const systemInstruction = `
+    Act as Zia, a senior FAANG L5 engineer. Your goal is to provide sharp, technical insights on code logic and results.
+    
+    Response Requirements:
+    - High-agency, professional, sharp tone.
+    - Each section header MUST be on its own line.
+    - The section content MUST start on a NEW line immediately after the header.
+    - 🚀 OVERVIEW
+    - 🚀 LOGIC & INTUITION
+    - 🚀 DRY RUN (Short, bullet-style walkthrough, max 4-5 steps)
+    - 🚀 ANALYSIS (Time/Space complexity and 1 critical pitfall)
+    - Keep the total response under 1200 characters.
+    - Use emojis and bold text for a premium feel.
+    - Strict formatting: No #, $, or LaTeX.
+    - Major separator: ━━━━━━━━━━━━━━.
+    `;
+
+    const prompt = `
+    Language: ${language}
+    
+    Code:
+    \`\`\`${language}
+    ${code}
+    \`\`\`
+    
+    Execution Result:
+    - Status: ${result.status}
+    - STDOUT: ${result.stdout || 'N/A'}
+    - STDERR: ${result.stderr || 'N/A'}
+    
+    Please explain this code and its execution result.
+    `;
+
+    const response = await client.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [systemInstruction, prompt],
+    });
+
+    return response.text;
+  } catch (error) {
+    console.error('Gemini explanation error:', error);
+    return "AI Analysis is currently unavailable for this snippet.";
+  }
+}

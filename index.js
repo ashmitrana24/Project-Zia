@@ -44,6 +44,10 @@ async function loadCommands() {
     
     if (command && 'name' in command && 'execute' in command) {
         client.commands.set(command.name, command);
+        // Handle aliases
+        if (command.aliases && Array.isArray(command.aliases)) {
+            command.aliases.forEach(alias => client.commands.set(alias, command));
+        }
     } else {
         console.warn(`[WARNING] The command at ${filePath} is missing a required "name" or "execute" property.`);
     }
@@ -58,7 +62,7 @@ client.once('ready', () => {
 client.on('messageCreate', async (message) => {
   if (message.author.bot || !message.content.startsWith(PREFIX)) return;
 
-  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const args = message.content.slice(PREFIX.length).trim().split(/\s+/);
   const commandName = args.shift().toLowerCase();
   const command = client.commands.get(commandName);
 
@@ -84,7 +88,7 @@ client.on('messageCreate', async (message) => {
   setTimeout(() => timestamps.delete(message.author.id), cooldownAmount);
 
   try {
-    await command.execute(message, args);
+    await command.execute(message, args, commandName);
   } catch (error) {
     console.error('Execution Error:', error);
     message.reply('There was an error trying to execute that command!');
