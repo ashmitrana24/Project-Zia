@@ -145,12 +145,134 @@ Or pushes toward system-level thinking.
 }
 
 /**
+ * Generates a DSA problem for the interview.
+ */
+export async function generateDSAProblem() {
+  try {
+    const prompt = `
+Generate one DSA coding interview problem.
+Include:
+Title
+Difficulty
+Problem Statement
+Constraints
+Example Input
+Example Output
+Do NOT include solution.
+
+STRICT FORMATTING RULES:
+- Never use the $ character.
+- Never use LaTeX-style math formatting (e.g., no \\le, \\ge, ^, etc. unless inside a code block).
+- Use plain text for mathematical expressions (e.g., "nums.length <= 10^5" should be "nums.length <= 100,000" or "nums.length <= 10^5" without $).
+- No slashes for escaping characters unless necessary for code.
+
+Strictly follow this structure:
+🚀 TITLE: [Problem Name]
+🚀 DIFFICULTY: [Easy/Medium/Hard]
+🚀 STATEMENT: [Description]
+🚀 CONSTRAINTS: [Constraints]
+🚀 SAMPLE I/O: [Example input and output]
+🚀 HIDDEN HINT: [Expected time complexity, e.g., O(N log N). This will be hidden from the user initially.]
+    `;
+
+    const response = await client.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [prompt],
+    });
+
+    return response.text;
+  } catch (error) {
+    console.error('Gemini Problem Generation Error:', error);
+    throw new Error('Failed to generate DSA problem.');
+  }
+}
+
+/**
+ * Generates a minimal hint for a DSA problem.
+ */
+export async function generateHint(problem, hintsUsed) {
+  try {
+    const prompt = `
+Problem:
+${problem}
+
+Hints already given: ${hintsUsed}
+
+Give one minimal hint without revealing the solution.
+Act as a FAANG interviewer. Keep it sharp and encouraging.
+
+STRICT FORMATTING RULES:
+- Never use the $ character.
+- Never use LaTeX-style math formatting.
+- No slashes for escaping characters.
+
+Format:
+🚀 HINT: [Your hint here]
+    `;
+
+    const response = await client.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [prompt],
+    });
+
+    return response.text;
+  } catch (error) {
+    console.error('Gemini Hint Error:', error);
+    throw new Error('Failed to generate hint.');
+  }
+}
+
+/**
+ * Evaluates a user's solution to a DSA problem.
+ */
+export async function evaluateSolution(problem, solution) {
+  try {
+    const systemInstruction = `
+Act as a FAANG-level interviewer.
+Evaluate this solution strictly.
+Do not be overly positive.
+Give structured feedback under:
+Correctness
+Time Complexity
+Space Complexity
+Edge Cases
+Optimization Suggestions
+Final Verdict (either "PASS" or "NEEDS IMPROVEMENT")
+
+Strict Formatting Rules:
+- No # or $ symbols.
+- No LaTeX formatting.
+- No slashes for escaping characters.
+- Use 🚀 HEADER: [Header Name] for sections.
+- Major separator: ━━━━━━━━━━━━━━.
+    `;
+
+    const prompt = `
+Problem:
+${problem}
+
+User's Solution:
+\`\`\`
+${solution}
+\`\`\`
+
+Evaluate now.
+    `;
+
+    const response = await client.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: [systemInstruction, prompt],
+    });
+
+    return response.text;
+  } catch (error) {
+    console.error('Gemini Evaluation Error:', error);
+    throw new Error('Failed to evaluate solution.');
+  }
+}
+
+/**
  * Explains a code execution result and its logic.
- * 
- * @param {string} language - The programming language.
- * @param {string} code - The code that was executed.
- * @param {object} result - The execution result from Wandbox.
- * @returns {Promise<string>} - The AI-generated explanation.
  */
 export async function explainCode(language, code, result) {
   try {
