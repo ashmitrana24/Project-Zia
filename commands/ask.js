@@ -1,30 +1,70 @@
+import { SlashCommandBuilder } from 'discord.js';
 import { generateResponse } from '../utils/gemini.js';
 
 export default {
+  data: new SlashCommandBuilder()
+    .setName('ask')
+    .setDescription('Ask a DSA question to the FAANG Engineer bot')
+    .addStringOption(option =>
+      option.setName('question')
+        .setDescription('The DSA problem or question to explain')
+        .setRequired(true)),
   name: 'ask',
   description: 'Ask a DSA question to the FAANG Engineer bot',
-  async execute(message, args) {
-    const query = args.join(' ');
+  async execute(interaction, args) {
+    // Handle both slash command and prefix command
+    let query;
+    let isInteraction = false;
+
+    if (interaction.isChatInputCommand?.()) {
+      query = interaction.options.getString('question');
+      isInteraction = true;
+    } else {
+      query = args.join(' ');
+    }
 
     if (!query) {
-      return message.reply('Please provide a query or a DSA problem to explain. Usage: `!ask <problem>`');
+      const msg = 'Please provide a query or a DSA problem to explain. Usage: `!ask <problem>` or use `/ask`';
+      return isInteraction ? interaction.reply({ content: msg, ephemeral: true }) : interaction.reply(msg);
     }
 
     try {
-      await message.channel.sendTyping();
+      if (isInteraction) {
+        await interaction.deferReply();
+      } else {
+        await interaction.channel.sendTyping();
+      }
+
       const responseText = await generateResponse(query);
 
       if (responseText.length <= 2000) {
-        await message.reply(responseText);
+        if (isInteraction) {
+          await interaction.editReply(responseText);
+        } else {
+          await interaction.reply(responseText);
+        }
       } else {
         const chunks = splitMessage(responseText, 1900);
-        for (const chunk of chunks) {
-          await message.channel.send(chunk);
+        for (let i = 0; i < chunks.length; i++) {
+          if (isInteraction && i === 0) {
+            await interaction.editReply(chunks[i]);
+          } else {
+            await interaction.channel.send(chunks[i]);
+          }
         }
       }
     } catch (error) {
       console.error('Command Error (!ask):', error);
-      message.reply('Sorry, I encountered an error while processing your request. Please try again later.');
+      const errorMsg = 'Sorry, I encountered an error while processing your request. Please try again later.';
+      if (isInteraction) {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply(errorMsg);
+        } else {
+          await interaction.reply({ content: errorMsg, ephemeral: true });
+        }
+      } else {
+        interaction.reply(errorMsg);
+      }
     }
   },
 };
