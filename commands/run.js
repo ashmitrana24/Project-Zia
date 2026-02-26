@@ -1,4 +1,4 @@
-import { EmbedBuilder } from 'discord.js';
+import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
 import { executeCode } from '../utils/wandbox.js';
 import { isSupported } from '../utils/languages.js';
 import { detectLanguage } from '../utils/detector.js';
@@ -7,35 +7,57 @@ import { explainCode } from '../utils/gemini.js';
 const PREFIX = '!';
 
 export default {
+  data: new SlashCommandBuilder()
+    .setName('run')
+    .setDescription('Execute code snippets in C++, Java, or Python.')
+    .addStringOption(option =>
+      option.setName('code')
+        .setDescription('The code snippets to execute')
+        .setRequired(true))
+    .addStringOption(option =>
+      option.setName('language')
+        .setDescription('Programming language (optional if using code blocks)')
+        .addChoices(
+          { name: 'C++', value: 'cpp' },
+          { name: 'Java', value: 'java' },
+          { name: 'Python', value: 'python' }
+        )),
   name: 'run',
   description: 'Execute code snippets in C++, Java, or Python.',
   aliases: ['py', 'python', 'cpp', 'java'],
-  async execute(message, args, commandName) {
+  async execute(interaction, args, commandName) {
+    const isInteraction = interaction.isChatInputCommand?.();
+    
     // 1. Initial Extraction
     let language = '';
     let code = '';
 
-    // If using an alias (e.g., !py), set specific language
-    const languageAliases = {
-      'py': 'python',
-      'python': 'python',
-      'cpp': 'cpp',
-      'java': 'java'
-    };
-
-    if (commandName in languageAliases) {
-      language = languageAliases[commandName];
-      // Code is everything after the command name
-      code = message.content.slice(message.content.indexOf(commandName) + commandName.length).trim();
+    if (isInteraction) {
+      code = interaction.options.getString('code');
+      language = interaction.options.getString('language') || '';
     } else {
-      // Standard !run usage
-      const firstArg = args[0]?.toLowerCase();
-      if (firstArg && isSupported(firstArg)) {
-        language = firstArg;
-        code = message.content.slice(message.content.indexOf(args[0]) + args[0].length).trim();
+      // If using an alias (e.g., !py), set specific language
+      const languageAliases = {
+        'py': 'python',
+        'python': 'python',
+        'cpp': 'cpp',
+        'java': 'java'
+      };
+
+      if (commandName in languageAliases) {
+        language = languageAliases[commandName];
+        // Code is everything after the command name
+        code = interaction.content.slice(interaction.content.indexOf(commandName) + commandName.length).trim();
       } else {
-        // No valid language arg (e.g., !run print("hi"))
-        code = message.content.slice(message.content.indexOf(commandName) + commandName.length).trim();
+        // Standard !run usage
+        const firstArg = args[0]?.toLowerCase();
+        if (firstArg && isSupported(firstArg)) {
+          language = firstArg;
+          code = interaction.content.slice(interaction.content.indexOf(args[0]) + args[0].length).trim();
+        } else {
+          // No valid language arg (e.g., !run print("hi"))
+          code = interaction.content.slice(interaction.content.indexOf(commandName) + commandName.length).trim();
+        }
       }
     }
 
@@ -100,19 +122,26 @@ export default {
 
     // 5. Validation
     if (!code) {
-      return message.reply(`Usage: \`${PREFIX}run <language> <code>\` or shortcuts like \`${PREFIX}py <code>\`\nExample:\n\`\`\`\n${PREFIX}py\nprint("Hello")\n\`\`\``);
+      const msg = `Usage: \`${PREFIX}run <language> <code>\` or shortcuts like \`${PREFIX}py <code>\`\nExample:\n\`\`\`\n${PREFIX}py\nprint("Hello")\n\`\`\``;
+      return isInteraction ? interaction.reply({ content: msg, ephemeral: true }) : interaction.reply(msg);
     }
 
     if (!isSupported(language)) {
-      return message.reply(`Unsupported language: \`${language}\`. Supported: \`cpp\`, \`java\`, \`python\`.`);
+      const msg = `Unsupported language: \`${language}\`. Supported: \`cpp\`, \`java\`, \`python\`.`;
+      return isInteraction ? interaction.reply({ content: msg, ephemeral: true }) : interaction.reply(msg);
     }
 
     if (code.length > 5000) {
-      return message.reply('Code is too long! Please keep it under 5000 characters.');
+      const msg = 'Code is too long! Please keep it under 5000 characters.';
+      return isInteraction ? interaction.reply({ content: msg, ephemeral: true }) : interaction.reply(msg);
     }
 
     try {
-      await message.channel.sendTyping();
+      if (isInteraction) {
+        await interaction.deferReply();
+      } else {
+        await interaction.channel.sendTyping();
+      }
       
       const result = await executeCode(language, code);
 
@@ -120,7 +149,10 @@ export default {
       const resultEmbed = new EmbedBuilder()
         .setColor('#5865F2') // Blurple
         .setTitle(`👨‍💻 Code Execution Result (${language.toUpperCase()})`)
-        .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL() })
+        .setAuthor({ 
+          name: isInteraction ? interaction.user.username : interaction.author.username, 
+          iconURL: isInteraction ? interaction.user.displayAvatarURL() : interaction.author.displayAvatarURL() 
+        })
         .setTimestamp();
 
       if (result.stdout) {
@@ -139,27 +171,44 @@ export default {
 
       resultEmbed.setFooter({ text: `Time: ${result.time}s | Memory: ${result.memory}KB` });
 
-      await message.reply({ embeds: [resultEmbed] });
+      if (isInteraction) {
+        await interaction.editReply({ embeds: [resultEmbed] });
+      } else {
+        await interaction.reply({ embeds: [resultEmbed] });
+      }
 
       // --- Build AI Insight Embed ---
       try {
-        await message.channel.sendTyping();
+        if (!isInteraction) await interaction.channel.sendTyping();
         const aiExplanation = await explainCode(language, code, result);
         
         const aiEmbed = new EmbedBuilder()
             .setColor('#EB459E') // Pink/Aesthetic
             .setTitle(`✨ Zia's Insights`)
             .setDescription(truncate(aiExplanation, 4000)) // Discord embeds allow up to 4096 in description
-            .setFooter({ text: 'Powered by Gemini 3 Flash', iconURL: message.client.user.displayAvatarURL() });
+            .setFooter({ text: 'Powered by Gemini 3 Flash', iconURL: (isInteraction ? interaction.client : interaction.client).user.displayAvatarURL() });
 
-        await message.reply({ embeds: [aiEmbed] });
+        if (isInteraction) {
+          await interaction.followUp({ embeds: [aiEmbed] });
+        } else {
+          await interaction.reply({ embeds: [aiEmbed] });
+        }
       } catch (aiError) {
         console.error('AI Explanation failed:', aiError);
       }
 
     } catch (error) {
       console.error('Command Error (!run):', error);
-      message.reply(`Error: ${error.message}`);
+      const errorMsg = `Error: ${error.message}`;
+      if (isInteraction) {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply(errorMsg);
+        } else {
+          await interaction.reply({ content: errorMsg, ephemeral: true });
+        }
+      } else {
+        interaction.reply(errorMsg);
+      }
     }
   },
 };

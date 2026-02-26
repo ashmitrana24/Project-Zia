@@ -1,53 +1,100 @@
-import { EmbedBuilder } from 'discord.js';
+import { EmbedBuilder, SlashCommandBuilder } from 'discord.js';
 import { generateDSAProblem, generateHint, evaluateSolution } from '../utils/gemini.js';
 
 const sessions = new Map();
 
 export default {
+  data: new SlashCommandBuilder()
+    .setName('interview')
+    .setDescription('DSA Interview system')
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('start')
+        .setDescription('Start a new mock interview session'))
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('hint')
+        .setDescription('Get a hint for the current problem'))
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('answer')
+        .setDescription('Submit your solution code')
+        .addStringOption(option =>
+          option.setName('code')
+            .setDescription('Your solution code')
+            .setRequired(true)))
+    .addSubcommand(subcommand =>
+      subcommand
+        .setName('end')
+        .setDescription('End the current interview session')),
   name: 'interview',
   description: 'DSA Interview system',
-  async execute(message, args) {
-    const subCommand = args[0]?.toLowerCase();
+  async execute(interaction, args) {
+    const isInteraction = interaction.isChatInputCommand?.();
+    const subCommand = isInteraction ? interaction.options.getSubcommand() : args[0]?.toLowerCase();
 
     if (!subCommand) {
-      return message.reply('Usage: `!interview start`, `!interview hint`, `!interview answer <code>`, or `!interview end`');
+      const msg = 'Usage: `!interview start`, `!interview hint`, `!interview answer <code>`, or `!interview end`';
+      return isInteraction ? interaction.reply({ content: msg, ephemeral: true }) : interaction.reply(msg);
     }
 
     try {
       switch (subCommand) {
         case 'start':
-          await handleStart(message);
+          await handleStart(interaction);
           break;
         case 'hint':
-          await handleHint(message);
+          await handleHint(interaction);
           break;
         case 'answer':
-          await handleAnswer(message, args.slice(1).join(' '));
+          const code = isInteraction ? interaction.options.getString('code') : args.slice(1).join(' ');
+          await handleAnswer(interaction, code);
           break;
         case 'end':
-          await handleEnd(message);
+          await handleEnd(interaction);
           break;
         default:
-          message.reply('Invalid sub-command. Use `start`, `hint`, `answer`, or `end`.');
+          const msg = 'Invalid sub-command. Use `start`, `hint`, `answer`, or `end`.';
+          if (isInteraction) {
+            await interaction.reply({ content: msg, ephemeral: true });
+          } else {
+            await interaction.reply(msg);
+          }
       }
     } catch (error) {
       console.error('Interview Command Error:', error);
-      message.reply('Sorry, I encountered an error. Please try again.');
+      const errorMsg = 'Sorry, I encountered an error. Please try again.';
+      if (isInteraction) {
+        if (interaction.deferred || interaction.replied) {
+          await interaction.editReply(errorMsg);
+        } else {
+          await interaction.reply({ content: errorMsg, ephemeral: true });
+        }
+      } else {
+        interaction.reply(errorMsg);
+      }
     }
   },
 };
 
-async function handleStart(message) {
-  if (sessions.has(message.author.id)) {
-    return message.reply('⚠️ You already have an active interview session! Use `!interview end` to stop it.');
+async function handleStart(interaction) {
+  const isInteraction = interaction.isChatInputCommand?.();
+  const userId = isInteraction ? interaction.user.id : interaction.author.id;
+  const channel = interaction.channel;
+
+  if (sessions.has(userId)) {
+    const msg = '⚠️ You already have an active interview session! Use `!interview end` or `/interview end` to stop it.';
+    return isInteraction ? interaction.reply({ content: msg, ephemeral: true }) : interaction.reply(msg);
   }
 
-  await message.channel.sendTyping();
-  message.reply('🚀 Generating your DSA problem... Get ready.');
+  if (isInteraction) {
+    await interaction.deferReply();
+  } else {
+    await channel.sendTyping();
+    await interaction.reply('🚀 Generating your DSA problem... Get ready.');
+  }
 
   const problemFull = await generateDSAProblem();
-  
-  // Parse problem sections for Embed
   const sections = parseProblem(problemFull);
   
   const session = {
@@ -58,7 +105,7 @@ async function handleStart(message) {
     startTime: Date.now(),
   };
 
-  sessions.set(message.author.id, session);
+  sessions.set(userId, session);
 
   const embed = new EmbedBuilder()
     .setTitle(`🧠 DSA Interview: ${sections.title || 'Coding Challenge'}`)
@@ -69,18 +116,31 @@ async function handleStart(message) {
       { name: 'Constraints', value: sections.constraints || 'Standard competitive programming limits.' },
       { name: 'Sample I/O', value: `\`\`\`\n${sections.sampleIO || 'N/A'}\n\`\`\`` }
     )
-    .setFooter({ text: 'Use !interview answer <code> to submit your solution.' });
+    .setFooter({ text: 'Use /interview answer or !interview answer <code> to submit your solution.' });
 
-  await message.channel.send({ embeds: [embed] });
+  if (isInteraction) {
+    await interaction.editReply({ embeds: [embed] });
+  } else {
+    await channel.send({ embeds: [embed] });
+  }
 }
 
-async function handleHint(message) {
-  const session = sessions.get(message.author.id);
+async function handleHint(interaction) {
+  const isInteraction = interaction.isChatInputCommand?.();
+  const userId = isInteraction ? interaction.user.id : interaction.author.id;
+  const session = sessions.get(userId);
+
   if (!session) {
-    return message.reply('❌ No active session. Start one with `!interview start`.');
+    const msg = '❌ No active session. Start one with `!interview start` or `/interview start`.';
+    return isInteraction ? interaction.reply({ content: msg, ephemeral: true }) : interaction.reply(msg);
   }
 
-  await message.channel.sendTyping();
+  if (isInteraction) {
+    await interaction.deferReply();
+  } else {
+    await interaction.channel.sendTyping();
+  }
+
   session.hintsUsed++;
   
   const hintText = await generateHint(session.problemFull, session.hintsUsed);
@@ -93,34 +153,46 @@ async function handleHint(message) {
     .setDescription(hint)
     .setFooter({ text: `Hints used: ${session.hintsUsed}` });
 
-  await message.channel.send({ embeds: [embed] });
+  if (isInteraction) {
+    await interaction.editReply({ embeds: [embed] });
+  } else {
+    await interaction.channel.send({ embeds: [embed] });
+  }
 }
 
-async function handleAnswer(message, code) {
-  const session = sessions.get(message.author.id);
+async function handleAnswer(interaction, code) {
+  const isInteraction = interaction.isChatInputCommand?.();
+  const userId = isInteraction ? interaction.user.id : interaction.author.id;
+  const session = sessions.get(userId);
+
   if (!session) {
-    return message.reply('❌ No active session. Start one with `!interview start`.');
+    const msg = '❌ No active session. Start one with `!interview start` or `/interview start`.';
+    return isInteraction ? interaction.reply({ content: msg, ephemeral: true }) : interaction.reply(msg);
   }
 
   if (!code) {
-    return message.reply('Please provide your code solution. Usage: `!interview answer <code>`');
+    const msg = 'Please provide your code solution. Usage: `!interview answer <code>` or use the code option in `/interview answer`.';
+    return isInteraction ? interaction.reply({ content: msg, ephemeral: true }) : interaction.reply(msg);
   }
 
   // Remove code block markers if present
   const cleanedCode = code.replace(/```[a-z]*\n?/gi, '').replace(/```/g, '').trim();
 
-  await message.channel.sendTyping();
+  if (isInteraction) {
+    await interaction.deferReply();
+  } else {
+    await interaction.channel.sendTyping();
+  }
+
   session.attempts++;
 
   const feedback = await evaluateSolution(session.problemFull, cleanedCode);
-  
-  // Parse feedback for fields
   const feedbackFields = parseFeedback(feedback);
   const isPass = feedback.toLowerCase().includes('final verdict: pass') || (feedbackFields.verdict && feedbackFields.verdict.toLowerCase().includes('pass'));
 
   const embed = new EmbedBuilder()
     .setTitle('🧠 Interview Feedback')
-    .setColor(isPass ? 0x00FF00 : 0xFF0000) // Green if pass, Red if not
+    .setColor(isPass ? 0x00FF00 : 0xFF0000)
     .addFields(
       { name: 'Correctness', value: feedbackFields.correctness || 'See below' },
       { name: 'Complexity', value: `Time: ${feedbackFields.time || 'N/A'}\nSpace: ${feedbackFields.space || 'N/A'}` },
@@ -129,37 +201,31 @@ async function handleAnswer(message, code) {
       { name: 'Final Verdict', value: feedbackFields.verdict || 'N/A' }
     );
 
-  // If there's extra info not captured in fields, put it in description
   if (!feedbackFields.correctness) {
     embed.setDescription(feedback.length > 4000 ? feedback.substring(0, 3997) + '...' : feedback);
   }
 
-  await message.channel.send({ embeds: [embed] });
+  if (isInteraction) {
+    await interaction.editReply({ embeds: [embed] });
+  } else {
+    await interaction.channel.send({ embeds: [embed] });
+  }
 }
 
-function parseFeedback(text) {
-  const fields = {};
-  const correctness = text.match(/🚀 HEADER: Correctness\s*([\s\S]*?)(?=🚀|$)/i);
-  const time = text.match(/🚀 HEADER: Time Complexity\s*([\s\S]*?)(?=🚀|$)/i);
-  const space = text.match(/🚀 HEADER: Space Complexity\s*([\s\S]*?)(?=🚀|$)/i);
-  const edge = text.match(/🚀 HEADER: Edge Cases\s*([\s\S]*?)(?=🚀|$)/i);
-  const opt = text.match(/🚀 HEADER: Optimization Suggestions\s*([\s\S]*?)(?=🚀|$)/i);
-  const verdict = text.match(/🚀 HEADER: Final Verdict\s*([\s\S]*?)(?=🚀|$)/i);
+async function handleEnd(interaction) {
+  const isInteraction = interaction.isChatInputCommand?.();
+  const userId = isInteraction ? interaction.user.id : interaction.author.id;
+  const session = sessions.get(userId);
 
-  if (correctness) fields.correctness = correctness[1].trim();
-  if (time) fields.time = time[1].trim();
-  if (space) fields.space = space[1].trim();
-  if (edge) fields.edgeCases = edge[1].trim();
-  if (opt) fields.optimization = opt[1].trim();
-  if (verdict) fields.verdict = verdict[1].trim();
-
-  return fields;
-}
-
-async function handleEnd(message) {
-  const session = sessions.get(message.author.id);
   if (!session) {
-    return message.reply('❌ You don\'t have an active interview session.');
+    const msg = '❌ You don\'t have an active interview session.';
+    return isInteraction ? interaction.reply({ content: msg, ephemeral: true }) : interaction.reply(msg);
+  }
+
+  if (isInteraction) {
+    await interaction.deferReply();
+  } else {
+    // No typing needed for end
   }
 
   const duration = Math.floor((Date.now() - session.startTime) / 60000);
@@ -174,8 +240,12 @@ async function handleEnd(message) {
     )
     .setDescription('Great effort! Keep practicing to sharpen your skills.');
 
-  sessions.delete(message.author.id);
-  await message.channel.send({ embeds: [embed] });
+  sessions.delete(userId);
+  if (isInteraction) {
+    await interaction.editReply({ embeds: [embed] });
+  } else {
+    await interaction.channel.send({ embeds: [embed] });
+  }
 }
 
 function parseProblem(text) {
